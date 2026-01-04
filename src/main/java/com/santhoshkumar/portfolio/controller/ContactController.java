@@ -12,8 +12,8 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
-@RequestMapping("/api/contact")
-@CrossOrigin(origins = "http://localhost:4200")
+@RequestMapping("/api")
+@CrossOrigin(origins = {"http://localhost:4200","https://santhoshkumar-dev-portfolio.netlify.app"})
 public class ContactController {
 
     private final EmailService emailService;
@@ -30,7 +30,7 @@ public class ContactController {
         this.rateLimitService = rateLimitService;
     }
 
-    @PostMapping
+    @PostMapping("/contact")
     public ResponseEntity<String> sendContact(
             @Valid @RequestBody ContactRequest request,
             HttpServletRequest httpRequest
