@@ -13,7 +13,6 @@ public class ContactRequest {
 	  @NotBlank(message = "Message is required")
     private String message;
 	  
-	  private String recaptcha;
 
     // getters & setters
     public String getName() {
@@ -39,11 +38,4 @@ public class ContactRequest {
     public void setMessage(String message) {
         this.message = message;
     }
-    public String getRecaptcha() {
-    	return recaptcha; 
-    	}
-    
-    public void setRecaptcha(String recaptcha) {
-    	this.recaptcha = recaptcha;
-    	}
 }

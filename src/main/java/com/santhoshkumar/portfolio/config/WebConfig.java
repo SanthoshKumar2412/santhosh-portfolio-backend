@@ -15,6 +15,7 @@ public class WebConfig implements WebMvcConfigurer {
                     "https://santhoshkumar-dev-portfolio.netlify.app"
                 )
                 .allowedMethods("GET", "POST", "OPTIONS")
-                .allowedHeaders("*");
+                .allowedHeaders("*")
+                .allowCredentials(false);
     }
 }

@@ -17,16 +17,13 @@ import org.springframework.web.bind.annotation.*;
 public class ContactController {
 
     private final EmailService emailService;
-    private final RecaptchaService recaptchaService;
     private final RateLimitService rateLimitService;
 
     public ContactController(
             EmailService emailService,
-            RecaptchaService recaptchaService,
             RateLimitService rateLimitService
     ) {
         this.emailService = emailService;
-        this.recaptchaService = recaptchaService;
         this.rateLimitService = rateLimitService;
     }
 
@@ -44,14 +41,6 @@ public class ContactController {
             return ResponseEntity
                     .status(429)
                     .body("Too many messages. Please wait 1 minute.");
-        }
-
-        /* 2️⃣ reCAPTCHA verification */
-        boolean captchaValid = recaptchaService.verify(request.getRecaptcha());
-        if (!captchaValid) {
-            return ResponseEntity
-                    .badRequest()
-                    .body("Invalid captcha");
         }
 
         /* 3️⃣ Send email */
