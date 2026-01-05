@@ -2,7 +2,6 @@ package com.santhoshkumar.portfolio.controller;
 
 import com.santhoshkumar.portfolio.dto.ContactRequest;
 import com.santhoshkumar.portfolio.service.EmailService;
-import com.santhoshkumar.portfolio.service.RecaptchaService;
 import com.santhoshkumar.portfolio.service.RateLimitService;
 
 import jakarta.servlet.http.HttpServletRequest;
