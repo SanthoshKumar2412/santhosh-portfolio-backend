@@ -1,27 +1,20 @@
 package com.santhosh.portfolio.service;
 
+import com.resend.Resend;
+import com.resend.services.emails.model.CreateEmailOptions;
+import com.resend.services.emails.model.CreateEmailResponse;
+import com.resend.core.exception.ResendException;
 import com.santhosh.portfolio.dto.ContactRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.HttpEntity;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
-import org.springframework.web.client.RestTemplate;
-
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
 
 @Service
 public class EmailService {
 
     private static final Logger log = LoggerFactory.getLogger(EmailService.class);
-    private static final String RESEND_API_URL = "https://api.resend.com/emails";
-
-    private final RestTemplate restTemplate = new RestTemplate();
 
     @Value("${app.mail.owner-address}")
     private String ownerAddress;
@@ -37,57 +30,40 @@ public class EmailService {
 
     /**
      * Sends the owner notification (styled HTML, quick scan in your inbox)
-     * and the sender's auto-reply (styled HTML, on-brand) via Resend's HTTP
-     * API. Runs on a background thread so the HTTP request doesn't wait.
-     * Uses HTTPS (port 443) instead of raw SMTP, so it isn't affected by
-     * Render's free-tier SMTP port block (25, 465, 587).
+     * and the sender's auto-reply (styled HTML, on-brand) via the Resend
+     * Java SDK. Runs on a background thread so the HTTP request doesn't
+     * wait. Uses HTTPS under the hood, so it isn't affected by Render's
+     * free-tier SMTP port block (25, 465, 587).
      */
     @Async
     public void sendContactEmails(ContactRequest request) {
-        try {
-            sendEmail(
-                    ownerAddress,
-                    "Portfolio contact form: " + request.getName(),
-                    buildOwnerNotificationHtml(request),
-                    request.getEmail()
-            );
+        Resend resend = new Resend(resendApiKey);
 
-            sendEmail(
-                    request.getEmail(),
-                    "Thanks for reaching out, " + request.getName(),
-                    buildAutoReplyHtml(request),
-                    null
-            );
-        } catch (Exception ex) {
+        try {
+            CreateEmailOptions ownerEmail = CreateEmailOptions.builder()
+                    .from(fromAddress)
+                    .to(ownerAddress)
+                    .replyTo(request.getEmail())
+                    .subject("Portfolio contact form: " + request.getName())
+                    .html(buildOwnerNotificationHtml(request))
+                    .build();
+
+            CreateEmailResponse ownerResponse = resend.emails().send(ownerEmail);
+            log.info("Owner notification sent, id={}", ownerResponse.getId());
+
+            CreateEmailOptions autoReply = CreateEmailOptions.builder()
+                    .from(fromAddress)
+                    .to(request.getEmail())
+                    .subject("Thanks for reaching out, " + request.getName())
+                    .html(buildAutoReplyHtml(request))
+                    .build();
+
+            CreateEmailResponse autoReplyResponse = resend.emails().send(autoReply);
+            log.info("Auto-reply sent, id={}", autoReplyResponse.getId());
+
+        } catch (ResendException ex) {
             log.error("Failed to send contact form emails for {}", request.getEmail(), ex);
         }
-    }
-
-    /**
-     * Sends a single email via Resend's REST API.
-     *
-     * @param to      recipient address
-     * @param subject email subject
-     * @param html    email HTML body
-     * @param replyTo optional reply-to address (used for the owner notification
-     *                so replying goes straight to the form sender)
-     */
-    private void sendEmail(String to, String subject, String html, String replyTo) {
-        HttpHeaders headers = new HttpHeaders();
-        headers.setBearerAuth(resendApiKey);
-        headers.setContentType(MediaType.APPLICATION_JSON);
-
-        Map<String, Object> body = new HashMap<>();
-        body.put("from", fromAddress);
-        body.put("to", List.of(to));
-        body.put("subject", subject);
-        body.put("html", html);
-        if (replyTo != null && !replyTo.isBlank()) {
-            body.put("reply_to", replyTo);
-        }
-
-        HttpEntity<Map<String, Object>> entity = new HttpEntity<>(body, headers);
-        restTemplate.postForEntity(RESEND_API_URL, entity, String.class);
     }
 
     private String buildOwnerNotificationHtml(ContactRequest request) {
@@ -110,22 +86,18 @@ public class EmailService {
             "<table role=\"presentation\" width=\"480\" cellpadding=\"0\" cellspacing=\"0\" bgcolor=\"#182329\" " +
             "style=\"background-color:#182329;border-radius:12px;border:1px solid rgba(255,255,255,0.08);overflow:hidden;\">" +
 
-            // Header bar
             "<tr><td style=\"padding:28px 32px 0 32px;\">" +
             "<span style=\"font-family:Arial, Helvetica, sans-serif;color:#f97316;font-size:13px;font-weight:bold;letter-spacing:1px;text-transform:uppercase;\">New Portfolio Message</span>" +
             "</td></tr>" +
 
-            // Heading
             "<tr><td style=\"padding:12px 32px 0 32px;\">" +
             "<h1 style=\"margin:0;font-family:Arial, Helvetica, sans-serif;color:#ffffff;font-size:22px;font-weight:bold;\">" + safeName + " sent you a message</h1>" +
             "</td></tr>" +
 
-            // Divider
             "<tr><td style=\"padding:16px 32px 0 32px;\">" +
             "<div style=\"height:2px;width:56px;background-color:#c2560f;border-radius:2px;\"></div>" +
             "</td></tr>" +
 
-            // Sender details
             "<tr><td style=\"padding:20px 32px 0 32px;\">" +
             "<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\">" +
             "<tr>" +
@@ -137,7 +109,6 @@ public class EmailService {
             "</table>" +
             "</td></tr>" +
 
-            // Quoted message box
             "<tr><td style=\"padding:0 32px 0 32px;\">" +
             "<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" bgcolor=\"#0e1b26\" " +
             "style=\"background-color:#0e1b26;border:1px solid rgba(255,255,255,0.08);border-radius:8px;\">" +
@@ -147,7 +118,6 @@ public class EmailService {
             "</table>" +
             "</td></tr>" +
 
-            // Reply button
             "<tr><td style=\"padding:24px 32px 32px 32px;\">" +
             "<a href=\"" + mailtoLink + "\" " +
             "style=\"display:inline-block;font-family:Arial, Helvetica, sans-serif;background-color:#f97316;color:#000000;font-size:14px;font-weight:bold;text-decoration:none;padding:12px 24px;border-radius:6px;\">" +
@@ -162,8 +132,6 @@ public class EmailService {
     }
 
     private String buildAutoReplyHtml(ContactRequest request) {
-        // Inline styles throughout — most email clients strip <style> blocks
-        // in <head>, so every rule has to live on the element itself.
         String safeName = escapeHtml(request.getName());
         String safeMessage = escapeHtml(request.getMessage());
 
@@ -180,29 +148,24 @@ public class EmailService {
             "<table role=\"presentation\" width=\"480\" cellpadding=\"0\" cellspacing=\"0\" bgcolor=\"#182329\" " +
             "style=\"background-color:#182329;border-radius:12px;border:1px solid rgba(255,255,255,0.08);overflow:hidden;\">" +
 
-            // Header bar
             "<tr><td style=\"padding:28px 32px 0 32px;\">" +
             "<span style=\"font-family:Arial, Helvetica, sans-serif;color:#f97316;font-size:13px;font-weight:bold;letter-spacing:1px;text-transform:uppercase;\">Santhoshkumar Raman</span>" +
             "</td></tr>" +
 
-            // Heading
             "<tr><td style=\"padding:12px 32px 0 32px;\">" +
             "<h1 style=\"margin:0;font-family:Arial, Helvetica, sans-serif;color:#ffffff;font-size:22px;font-weight:bold;\">Thanks for reaching out, " + safeName + "</h1>" +
             "</td></tr>" +
 
-            // Divider
             "<tr><td style=\"padding:16px 32px 0 32px;\">" +
             "<div style=\"height:2px;width:56px;background-color:#c2560f;border-radius:2px;\"></div>" +
             "</td></tr>" +
 
-            // Body copy
             "<tr><td style=\"padding:20px 32px 0 32px;\">" +
             "<p style=\"margin:0;font-family:Arial, Helvetica, sans-serif;color:#9ca3af;font-size:14px;line-height:1.6;\">" +
             "I've received your message and will get back to you soon. Here's a copy of what you sent, for your records:" +
             "</p>" +
             "</td></tr>" +
 
-            // Quoted message box
             "<tr><td style=\"padding:16px 32px 0 32px;\">" +
             "<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" bgcolor=\"#0e1b26\" " +
             "style=\"background-color:#0e1b26;border:1px solid rgba(255,255,255,0.08);border-radius:8px;\">" +
@@ -212,13 +175,11 @@ public class EmailService {
             "</table>" +
             "</td></tr>" +
 
-            // Signature
             "<tr><td style=\"padding:24px 32px 0 32px;\">" +
             "<p style=\"margin:0;font-family:Arial, Helvetica, sans-serif;color:#9ca3af;font-size:14px;line-height:1.6;\">Best,<br/>" +
             "<span style=\"color:#ffffff;font-weight:bold;\">Santhoshkumar Raman</span></p>" +
             "</td></tr>" +
 
-            // Social links footer
             "<tr><td style=\"padding:20px 32px 0 32px;\">" +
             "<a href=\"https://github.com/SanthoshKumar2412\" style=\"font-family:Arial, Helvetica, sans-serif;color:#f97316;font-size:13px;text-decoration:none;font-weight:bold;\">GitHub</a>" +
             "<span style=\"color:#4b5563;font-size:13px;\">&nbsp;&nbsp;•&nbsp;&nbsp;</span>" +
@@ -227,7 +188,6 @@ public class EmailService {
             "<a href=\"https://santhoshkumar-dev-portfolio.netlify.app\" style=\"font-family:Arial, Helvetica, sans-serif;color:#f97316;font-size:13px;text-decoration:none;font-weight:bold;\">Portfolio</a>" +
             "</td></tr>" +
 
-            // Automated-message note
             "<tr><td style=\"padding:20px 32px 32px 32px;\">" +
             "<p style=\"margin:0;font-family:Arial, Helvetica, sans-serif;color:#4b5563;font-size:12px;line-height:1.5;\">" +
             "This is an automated confirmation — a personal reply will follow separately." +
