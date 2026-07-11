@@ -1,0 +1,238 @@
+package com.santhosh.portfolio.service;
+
+import com.santhosh.portfolio.dto.ContactRequest;
+import jakarta.mail.MessagingException;
+import jakarta.mail.internet.MimeMessage;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.mail.javamail.JavaMailSender;
+import org.springframework.mail.javamail.MimeMessageHelper;
+import org.springframework.scheduling.annotation.Async;
+import org.springframework.stereotype.Service;
+
+@Service
+public class EmailService {
+
+    private static final Logger log = LoggerFactory.getLogger(EmailService.class);
+
+    private final JavaMailSender mailSender;
+
+    @Value("${app.mail.owner-address}")
+    private String ownerAddress;
+
+    @Value("${spring.mail.username}")
+    private String fromAddress;
+
+    public EmailService(JavaMailSender mailSender) {
+        this.mailSender = mailSender;
+    }
+
+    /**
+     * Sends the owner notification (plain text, for a quick scan in your inbox)
+     * and the sender's auto-reply (styled HTML, on-brand) in the same SMTP
+     * session. Runs on a background thread so the HTTP request doesn't wait.
+     */
+    @Async
+    public void sendContactEmails(ContactRequest request) {
+        try {
+            MimeMessage ownerMessage = buildOwnerNotification(request);
+            MimeMessage autoReply = buildAutoReply(request);
+
+            // Sending both in one call reuses a single SMTP connection
+            // instead of opening one per message.
+            mailSender.send(ownerMessage, autoReply);
+        } catch (Exception ex) {
+            log.error("Failed to send contact form emails for {}", request.getEmail(), ex);
+        }
+    }
+
+    private MimeMessage buildOwnerNotification(ContactRequest request) throws MessagingException {
+        MimeMessage mimeMessage = mailSender.createMimeMessage();
+        MimeMessageHelper helper = new MimeMessageHelper(mimeMessage, false, "UTF-8");
+
+        helper.setFrom(fromAddress);
+        helper.setTo(ownerAddress);
+        helper.setReplyTo(request.getEmail());
+        helper.setSubject("Portfolio contact form: " + request.getName());
+        helper.setText(buildOwnerNotificationHtml(request), true);
+
+        return mimeMessage;
+    }
+
+    private String buildOwnerNotificationHtml(ContactRequest request) {
+        String safeName = escapeHtml(request.getName());
+        String safeEmail = escapeHtml(request.getEmail());
+        String safeMessage = escapeHtml(request.getMessage());
+        String mailtoLink = "mailto:" + request.getEmail() + "?subject=" +
+                java.net.URLEncoder.encode("Re: your message to Santhoshkumar Raman", java.nio.charset.StandardCharsets.UTF_8);
+
+        return "<!DOCTYPE html>" +
+            "<html><head>" +
+            "<meta charset=\"UTF-8\">" +
+            "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">" +
+            "<meta name=\"format-detection\" content=\"telephone=no\">" +
+            "</head>" +
+            "<body style=\"margin:0;padding:0;background-color:#0e1b26;font-family:Arial, Helvetica, sans-serif;\">" +
+            "<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" bgcolor=\"#0e1b26\" style=\"background-color:#0e1b26;padding:40px 0;\">" +
+            "<tr><td align=\"center\">" +
+
+            "<table role=\"presentation\" width=\"480\" cellpadding=\"0\" cellspacing=\"0\" bgcolor=\"#182329\" " +
+            "style=\"background-color:#182329;border-radius:12px;border:1px solid rgba(255,255,255,0.08);overflow:hidden;\">" +
+
+            // Header bar
+            "<tr><td style=\"padding:28px 32px 0 32px;\">" +
+            "<span style=\"font-family:Arial, Helvetica, sans-serif;color:#f97316;font-size:13px;font-weight:bold;letter-spacing:1px;text-transform:uppercase;\">New Portfolio Message</span>" +
+            "</td></tr>" +
+
+            // Heading
+            "<tr><td style=\"padding:12px 32px 0 32px;\">" +
+            "<h1 style=\"margin:0;font-family:Arial, Helvetica, sans-serif;color:#ffffff;font-size:22px;font-weight:bold;\">" + safeName + " sent you a message</h1>" +
+            "</td></tr>" +
+
+            // Divider
+            "<tr><td style=\"padding:16px 32px 0 32px;\">" +
+            "<div style=\"height:2px;width:56px;background-color:#c2560f;border-radius:2px;\"></div>" +
+            "</td></tr>" +
+
+            // Sender details
+            "<tr><td style=\"padding:20px 32px 0 32px;\">" +
+            "<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\">" +
+            "<tr>" +
+            "<td style=\"padding:0 0 6px 0;font-family:Arial, Helvetica, sans-serif;color:#6b7280;font-size:12px;text-transform:uppercase;letter-spacing:0.5px;\">From</td>" +
+            "</tr>" +
+            "<tr>" +
+            "<td style=\"padding:0 0 16px 0;font-family:Arial, Helvetica, sans-serif;color:#ffffff;font-size:15px;\">" + safeName + " &lt;<a href=\"mailto:" + safeEmail + "\" style=\"color:#f97316;text-decoration:none;\">" + safeEmail + "</a>&gt;</td>" +
+            "</tr>" +
+            "</table>" +
+            "</td></tr>" +
+
+            // Quoted message box
+            "<tr><td style=\"padding:0 32px 0 32px;\">" +
+            "<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" bgcolor=\"#0e1b26\" " +
+            "style=\"background-color:#0e1b26;border:1px solid rgba(255,255,255,0.08);border-radius:8px;\">" +
+            "<tr><td style=\"padding:16px 20px;\">" +
+            "<p style=\"margin:0;font-family:Arial, Helvetica, sans-serif;color:#d1d5db;font-size:14px;line-height:1.6;\">" + safeMessage + "</p>" +
+            "</td></tr>" +
+            "</table>" +
+            "</td></tr>" +
+
+            // Reply button
+            "<tr><td style=\"padding:24px 32px 32px 32px;\">" +
+            "<a href=\"" + mailtoLink + "\" " +
+            "style=\"display:inline-block;font-family:Arial, Helvetica, sans-serif;background-color:#f97316;color:#000000;font-size:14px;font-weight:bold;text-decoration:none;padding:12px 24px;border-radius:6px;\">" +
+            "Reply to " + safeName +
+            "</a>" +
+            "</td></tr>" +
+
+            "</table>" +
+            "</td></tr>" +
+            "</table>" +
+            "</body></html>";
+    }
+
+    private MimeMessage buildAutoReply(ContactRequest request) throws MessagingException {
+        MimeMessage mimeMessage = mailSender.createMimeMessage();
+        MimeMessageHelper helper = new MimeMessageHelper(mimeMessage, false, "UTF-8");
+
+        helper.setFrom(fromAddress);
+        helper.setTo(request.getEmail());
+        helper.setSubject("Thanks for reaching out, " + request.getName());
+        helper.setText(buildAutoReplyHtml(request), true);
+
+        return mimeMessage;
+    }
+
+    private String buildAutoReplyHtml(ContactRequest request) {
+        // Inline styles throughout — most email clients strip <style> blocks
+        // in <head>, so every rule has to live on the element itself.
+        String safeName = escapeHtml(request.getName());
+        String safeMessage = escapeHtml(request.getMessage());
+
+        return "<!DOCTYPE html>" +
+            "<html><head>" +
+            "<meta charset=\"UTF-8\">" +
+            "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">" +
+            "<meta name=\"format-detection\" content=\"telephone=no\">" +
+            "</head>" +
+            "<body style=\"margin:0;padding:0;background-color:#0e1b26;font-family:Arial, Helvetica, sans-serif;\">" +
+            "<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" bgcolor=\"#0e1b26\" style=\"background-color:#0e1b26;padding:40px 0;\">" +
+            "<tr><td align=\"center\">" +
+
+            "<table role=\"presentation\" width=\"480\" cellpadding=\"0\" cellspacing=\"0\" bgcolor=\"#182329\" " +
+            "style=\"background-color:#182329;border-radius:12px;border:1px solid rgba(255,255,255,0.08);overflow:hidden;\">" +
+
+            // Header bar
+            "<tr><td style=\"padding:28px 32px 0 32px;\">" +
+            "<span style=\"font-family:Arial, Helvetica, sans-serif;color:#f97316;font-size:13px;font-weight:bold;letter-spacing:1px;text-transform:uppercase;\">Santhoshkumar Raman</span>" +
+            "</td></tr>" +
+
+            // Heading
+            "<tr><td style=\"padding:12px 32px 0 32px;\">" +
+            "<h1 style=\"margin:0;font-family:Arial, Helvetica, sans-serif;color:#ffffff;font-size:22px;font-weight:bold;\">Thanks for reaching out, " + safeName + "</h1>" +
+            "</td></tr>" +
+
+            // Divider
+            "<tr><td style=\"padding:16px 32px 0 32px;\">" +
+            "<div style=\"height:2px;width:56px;background-color:#c2560f;border-radius:2px;\"></div>" +
+            "</td></tr>" +
+
+            // Body copy
+            "<tr><td style=\"padding:20px 32px 0 32px;\">" +
+            "<p style=\"margin:0;font-family:Arial, Helvetica, sans-serif;color:#9ca3af;font-size:14px;line-height:1.6;\">" +
+            "I've received your message and will get back to you soon. Here's a copy of what you sent, for your records:" +
+            "</p>" +
+            "</td></tr>" +
+
+            // Quoted message box
+            "<tr><td style=\"padding:16px 32px 0 32px;\">" +
+            "<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" bgcolor=\"#0e1b26\" " +
+            "style=\"background-color:#0e1b26;border:1px solid rgba(255,255,255,0.08);border-radius:8px;\">" +
+            "<tr><td style=\"padding:16px 20px;\">" +
+            "<p style=\"margin:0;font-family:Arial, Helvetica, sans-serif;color:#d1d5db;font-size:14px;line-height:1.6;font-style:italic;\">\u201C" + safeMessage + "\u201D</p>" +
+            "</td></tr>" +
+            "</table>" +
+            "</td></tr>" +
+
+            // Signature
+            "<tr><td style=\"padding:24px 32px 0 32px;\">" +
+            "<p style=\"margin:0;font-family:Arial, Helvetica, sans-serif;color:#9ca3af;font-size:14px;line-height:1.6;\">Best,<br/>" +
+            "<span style=\"color:#ffffff;font-weight:bold;\">Santhoshkumar Raman</span></p>" +
+            "</td></tr>" +
+
+            // Social links footer
+            "<tr><td style=\"padding:20px 32px 0 32px;\">" +
+            "<a href=\"https://github.com/SanthoshKumar2412\" style=\"font-family:Arial, Helvetica, sans-serif;color:#f97316;font-size:13px;text-decoration:none;font-weight:bold;\">GitHub</a>" +
+            "<span style=\"color:#4b5563;font-size:13px;\">&nbsp;&nbsp;•&nbsp;&nbsp;</span>" +
+            "<a href=\"https://www.linkedin.com/in/santhoshkumar-r-b06030252\" style=\"font-family:Arial, Helvetica, sans-serif;color:#f97316;font-size:13px;text-decoration:none;font-weight:bold;\">LinkedIn</a>" +
+            "<span style=\"color:#4b5563;font-size:13px;\">&nbsp;&nbsp;•&nbsp;&nbsp;</span>" +
+            "<a href=\"https://santhoshkumar-dev-portfolio.netlify.app\" style=\"font-family:Arial, Helvetica, sans-serif;color:#f97316;font-size:13px;text-decoration:none;font-weight:bold;\">Portfolio</a>" +
+            "</td></tr>" +
+
+            // Automated-message note
+            "<tr><td style=\"padding:20px 32px 32px 32px;\">" +
+            "<p style=\"margin:0;font-family:Arial, Helvetica, sans-serif;color:#4b5563;font-size:12px;line-height:1.5;\">" +
+            "This is an automated confirmation — a personal reply will follow separately." +
+            "</p>" +
+            "</td></tr>" +
+
+            "</table>" +
+            "</td></tr>" +
+            "</table>" +
+            "</body></html>";
+    }
+
+    /**
+     * Minimal HTML-escaping so form input can never break out of the markup
+     * or inject scripts/tags into the email body.
+     */
+    private String escapeHtml(String input) {
+        if (input == null) return "";
+        return input
+                .replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+                .replace("\"", "&quot;")
+                .replace("'", "&#39;");
+    }
+}
