@@ -1,63 +1,93 @@
 package com.santhosh.portfolio.service;
 
 import com.santhosh.portfolio.dto.ContactRequest;
-import jakarta.mail.MessagingException;
-import jakarta.mail.internet.MimeMessage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.mail.javamail.JavaMailSender;
-import org.springframework.mail.javamail.MimeMessageHelper;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.RestTemplate;
+
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 @Service
 public class EmailService {
 
     private static final Logger log = LoggerFactory.getLogger(EmailService.class);
+    private static final String RESEND_API_URL = "https://api.resend.com/emails";
 
-    private final JavaMailSender mailSender;
+    private final RestTemplate restTemplate = new RestTemplate();
 
     @Value("${app.mail.owner-address}")
     private String ownerAddress;
 
-    @Value("${spring.mail.username}")
+    // Resend API key, e.g. re_xxxxxxxx
+    @Value("${resend.api-key}")
+    private String resendApiKey;
+
+    // Must be on a domain verified in Resend, e.g. "Portfolio <contact@yourdomain.com>"
+    // Until you verify a domain, use Resend's shared test sender: onboarding@resend.dev
+    @Value("${resend.from-address}")
     private String fromAddress;
 
-    public EmailService(JavaMailSender mailSender) {
-        this.mailSender = mailSender;
-    }
-
     /**
-     * Sends the owner notification (plain text, for a quick scan in your inbox)
-     * and the sender's auto-reply (styled HTML, on-brand) in the same SMTP
-     * session. Runs on a background thread so the HTTP request doesn't wait.
+     * Sends the owner notification (styled HTML, quick scan in your inbox)
+     * and the sender's auto-reply (styled HTML, on-brand) via Resend's HTTP
+     * API. Runs on a background thread so the HTTP request doesn't wait.
+     * Uses HTTPS (port 443) instead of raw SMTP, so it isn't affected by
+     * Render's free-tier SMTP port block (25, 465, 587).
      */
     @Async
     public void sendContactEmails(ContactRequest request) {
         try {
-            MimeMessage ownerMessage = buildOwnerNotification(request);
-            MimeMessage autoReply = buildAutoReply(request);
+            sendEmail(
+                    ownerAddress,
+                    "Portfolio contact form: " + request.getName(),
+                    buildOwnerNotificationHtml(request),
+                    request.getEmail()
+            );
 
-            // Sending both in one call reuses a single SMTP connection
-            // instead of opening one per message.
-            mailSender.send(ownerMessage, autoReply);
+            sendEmail(
+                    request.getEmail(),
+                    "Thanks for reaching out, " + request.getName(),
+                    buildAutoReplyHtml(request),
+                    null
+            );
         } catch (Exception ex) {
             log.error("Failed to send contact form emails for {}", request.getEmail(), ex);
         }
     }
 
-    private MimeMessage buildOwnerNotification(ContactRequest request) throws MessagingException {
-        MimeMessage mimeMessage = mailSender.createMimeMessage();
-        MimeMessageHelper helper = new MimeMessageHelper(mimeMessage, false, "UTF-8");
+    /**
+     * Sends a single email via Resend's REST API.
+     *
+     * @param to      recipient address
+     * @param subject email subject
+     * @param html    email HTML body
+     * @param replyTo optional reply-to address (used for the owner notification
+     *                so replying goes straight to the form sender)
+     */
+    private void sendEmail(String to, String subject, String html, String replyTo) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setBearerAuth(resendApiKey);
+        headers.setContentType(MediaType.APPLICATION_JSON);
 
-        helper.setFrom(fromAddress);
-        helper.setTo(ownerAddress);
-        helper.setReplyTo(request.getEmail());
-        helper.setSubject("Portfolio contact form: " + request.getName());
-        helper.setText(buildOwnerNotificationHtml(request), true);
+        Map<String, Object> body = new HashMap<>();
+        body.put("from", fromAddress);
+        body.put("to", List.of(to));
+        body.put("subject", subject);
+        body.put("html", html);
+        if (replyTo != null && !replyTo.isBlank()) {
+            body.put("reply_to", replyTo);
+        }
 
-        return mimeMessage;
+        HttpEntity<Map<String, Object>> entity = new HttpEntity<>(body, headers);
+        restTemplate.postForEntity(RESEND_API_URL, entity, String.class);
     }
 
     private String buildOwnerNotificationHtml(ContactRequest request) {
@@ -129,18 +159,6 @@ public class EmailService {
             "</td></tr>" +
             "</table>" +
             "</body></html>";
-    }
-
-    private MimeMessage buildAutoReply(ContactRequest request) throws MessagingException {
-        MimeMessage mimeMessage = mailSender.createMimeMessage();
-        MimeMessageHelper helper = new MimeMessageHelper(mimeMessage, false, "UTF-8");
-
-        helper.setFrom(fromAddress);
-        helper.setTo(request.getEmail());
-        helper.setSubject("Thanks for reaching out, " + request.getName());
-        helper.setText(buildAutoReplyHtml(request), true);
-
-        return mimeMessage;
     }
 
     private String buildAutoReplyHtml(ContactRequest request) {
